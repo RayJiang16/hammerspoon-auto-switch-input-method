@@ -11,10 +11,11 @@ end
 
 -- 配置：app 和对应的输入法
 local app2Ime = {
-    {'/System/Library/CoreServices/Finder.app', 'English'},
+    {'/Applications/iTerm.app', 'English'},
     {'/Applications/Visual Studio Code.app', 'English'},
     {'/Applications/Xcode.app', 'English'},
     {'/Applications/Google Chrome.app', 'English'},
+    {'/System/Library/CoreServices/Finder.app', 'English'},
     {'/Applications/Kindle.app', 'English'},
     {'/Applications/System Preferences.app', 'English'},
     {'/Applications/Arc.app', 'English'},
@@ -24,7 +25,6 @@ local app2Ime = {
     {'/Applications/Hammerfall.app', 'English'},
     {'/Applications/Lookin.app', 'English'},
     {'/Applications/Warp.app', 'English'},
-    {'/Applications/iTerm.app', 'English'},
     {'/Applications/Proxyman.app', 'English'},
     {'/Applications/企业微信.app', 'Chinese'},
     {'/Applications/WeChat.app', 'Chinese'},
@@ -72,7 +72,9 @@ end
 -- 参数 1 mode 键，可填写: command,control,option,shift
 -- 参数 2 key 键，如果需要绑定特殊按键，如上下左右，参考：https://www.hammerspoon.org/docs/hs.keycodes.html#map
 -- 参数 3 需要激活 app 的路径
+-- 静态绑定
 local app2key = {
+    {{'option', 'command', 'shift'}, "8", '/Applications/Xcode.app'},
     {{'option'}, "1", '/Applications/Xcode.app'},
     {{'option'}, "2", '/Applications/Arc.app'},
     {{'option'}, "3", '/System/Library/CoreServices/Finder.app'},
@@ -83,13 +85,18 @@ local app2key = {
     {{'shift', 'option'}, "2", '/Applications/Proxyman.app'},
     {{'shift', 'option'}, "3", '/Applications/Fork.app'}
 }
-
 for index, obj in pairs(app2key) do
     hs.hotkey.bind(obj[1], obj[2], function()
         hs.application.launchOrFocus(obj[3])
     end)
 end
-
+-- 动态绑定 app
+-- [appName: path]
+local lastAppName = nil
+local lastAppNameMap = {}
+hs.hotkey.bind({'option', 'command', 'shift'}, "9", function()
+    hs.application.launchOrFocus(lastAppNameMap[lastAppName])
+end)
 
 
 -- ######### 鼠标根据 app 移动，配合快捷键切换 app 使用，适用于多个屏幕
@@ -141,6 +148,18 @@ function containsAppName(appName)
     return false
 end
 
+-- 判断点是否在矩形区域内
+function isPointInRect(point, rect)
+    if point.x >= rect.x and
+       point.x <= rect.x + rect.w and
+       point.y >= rect.y and
+       point.y <= rect.y + rect.h then
+      return true
+    else
+      return false
+    end
+end
+
 -- 更新鼠标位置
 function updateMouse(appName)
     deactivatedPoints = hs.mouse.absolutePosition()
@@ -168,7 +187,11 @@ function updateMouse(appName)
             else
                 -- 如果 app 窗口 和 上次记录的窗口 一致则移动，否则移动到 app 窗口中间
                 if (focusedWindow:screen():id() == mouse_object[appName].screenID) then
-                    hs.mouse.absolutePosition(mouse_object[appName].points)
+                    if (isPointInRect(mouse_object[appName].points, focusedWindow:frame())) then
+                        hs.mouse.absolutePosition(mouse_object[appName].points)
+                    else
+                        hs.mouse.absolutePosition(targetAppCenter)
+                    end
                 else
                     mouse_object[appName].screenID = focusedWindow:screen():id()
                     hs.mouse.absolutePosition(targetAppCenter)
@@ -187,15 +210,17 @@ function applicationWatcher(appName, eventType, appObject)
     if (eventType == hs.application.watcher.activated or eventType == hs.application.watcher.launched) then
         updateFocusAppInputMethod()
         updateMouse(appName)
+        lastAppNameMap[appName] = hs.window.focusedWindow():application():path()
     end
     
     if (eventType == hs.application.watcher.deactivated) then 
+        lastAppName = appName
         if mouse_object[appName] then 
             -- 离开 app 时如果 鼠标和 app 在同一个屏幕，记录鼠标位置
             local targetWindow = hs.window.get(mouse_object[appName].windowID)
             if targetWindow then
                 -- hs.alert.show(appName..targetWindow:title()..targetWindow:screen():id()..deactivatedScreen)
-                if (targetWindow:screen():id() == deactivatedScreen) then
+                if (targetWindow:screen():id() == deactivatedScreen and isPointInRect(deactivatedPoints, targetWindow:frame())) then
                     mouse_object[appName].points = deactivatedPoints
                 end
                 mouse_object[appName].screenID = targetWindow:screen():id()
